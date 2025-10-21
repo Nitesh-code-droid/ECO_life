@@ -3,14 +3,17 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
 
+// Environment shim for Vite
+const env = (typeof import.meta !== 'undefined' ? import.meta.env : {}) || {};
+
 // Firebase config - Replace with your actual Firebase project credentials
 const firebaseConfig = {
-  apiKey: process.env.REACT_APP_FIREBASE_API_KEY || "your-api-key-here",
-  authDomain: process.env.REACT_APP_FIREBASE_AUTH_DOMAIN || "your-project-id.firebaseapp.com",
-  projectId: process.env.REACT_APP_FIREBASE_PROJECT_ID || "your-project-id",
-  storageBucket: process.env.REACT_APP_FIREBASE_STORAGE_BUCKET || "your-project-id.appspot.com",
-  messagingSenderId: process.env.REACT_APP_FIREBASE_MESSAGING_SENDER_ID || "your-messaging-sender-id",
-  appId: process.env.REACT_APP_FIREBASE_APP_ID || "your-app-id"
+  apiKey: env.VITE_FIREBASE_API_KEY || "your-api-key-here",
+  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "your-project-id.firebaseapp.com",
+  projectId: env.VITE_FIREBASE_PROJECT_ID || "your-project-id",
+  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "your-project-id.appspot.com",
+  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "your-messaging-sender-id",
+  appId: env.VITE_FIREBASE_APP_ID || "your-app-id"
 };
 
 // Initialize Firebase
@@ -190,6 +193,6 @@ export const sampleUserData = {
 
 // Check if Firebase is properly configured
 export const isFirebaseConfigured = () => {
-  return firebaseConfig.apiKey !== "your-api-key-here" && 
-         firebaseConfig.projectId !== "your-project-id";
+  // Consider configured only if essential keys are present
+  return Boolean(env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID);
 };
