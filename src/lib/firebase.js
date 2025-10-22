@@ -2,24 +2,24 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getStorage } from 'firebase/storage';
 
-// Environment shim for Vite
-const env = (typeof import.meta !== 'undefined' ? import.meta.env : {}) || {};
-
-// Firebase config - Replace with your actual Firebase project credentials
+// Firebase config - Using VITE_ prefix for Vite environment variables
 const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || "your-api-key-here",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "your-project-id.firebaseapp.com",
-  projectId: env.VITE_FIREBASE_PROJECT_ID || "your-project-id",
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "your-project-id.appspot.com",
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "your-messaging-sender-id",
-  appId: env.VITE_FIREBASE_APP_ID || "your-app-id"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDLLdkSkHwcQwKGiMfvGYy0oOOw6t4dd04",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ecolife-d8306.firebaseapp.com",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ecolife-d8306",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ecolife-d8306.firebasestorage.app",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "837150090249",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:837150090249:web:f0d7af6b2cf70b85ca84d8",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-06P5ZDPJH5"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Google Auth Provider
 const googleProvider = new GoogleAuthProvider();
@@ -118,7 +118,10 @@ export const addHabit = async (userId, habitData) => {
       userId,
       ...habitData,
       timestamp: new Date(),
-      greenCredits: habitData.greenCredits || 5
+      greenCredits: habitData.greenCredits || 5,
+      photos: habitData.photos || [],
+      hasPhotos: (habitData.photos && habitData.photos.length > 0) || false,
+      verified: false // Will be verified by AI later
     });
     
     // Update user's total green credits
@@ -147,6 +150,39 @@ export const getUserHabits = async (userId) => {
   } catch (error) {
     console.error("Error getting habits:", error);
     return sampleUserData.habits; // Fallback to sample data
+  }
+};
+
+// Get habits with photos for AI verification
+export const getHabitsWithPhotos = async (userId) => {
+  try {
+    const q = query(
+      collection(db, 'habits'),
+      where('userId', '==', userId),
+      where('hasPhotos', '==', true),
+      where('verified', '==', false),
+      orderBy('timestamp', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  } catch (error) {
+    console.error("Error getting habits with photos:", error);
+    return [];
+  }
+};
+
+// Update habit verification status
+export const updateHabitVerification = async (habitId, verified, aiAnalysis = null) => {
+  try {
+    const habitRef = doc(db, 'habits', habitId);
+    await setDoc(habitRef, {
+      verified,
+      aiAnalysis,
+      verifiedAt: new Date()
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error updating habit verification:", error);
+    throw error;
   }
 };
 
@@ -184,15 +220,40 @@ export const sampleUserData = {
   streakDays: 12,
   totalCO2Saved: 45.7,
   habits: [
-    { name: 'Used reusable water bottle', date: new Date(), greenCredits: 5, category: 'waste-reduction' },
-    { name: 'Cycled to work', date: new Date(Date.now() - 86400000), greenCredits: 10, category: 'transportation' },
-    { name: 'Bought organic vegetables', date: new Date(Date.now() - 172800000), greenCredits: 8, category: 'food' },
-    { name: 'Used LED bulbs', date: new Date(Date.now() - 259200000), greenCredits: 6, category: 'energy' }
+    { name: 'Used reusable water bottle', date: new Date(), greenCredits: 5, category: 'waste-reduction', photos: [] },
+    { name: 'Cycled to work', date: new Date(Date.now() - 86400000), greenCredits: 10, category: 'transportation', photos: [] },
+    { name: 'Bought organic vegetables', date: new Date(Date.now() - 172800000), greenCredits: 8, category: 'food', photos: [] },
+    { name: 'Used LED bulbs', date: new Date(Date.now() - 259200000), greenCredits: 6, category: 'energy', photos: [] }
   ]
 };
 
 // Check if Firebase is properly configured
 export const isFirebaseConfigured = () => {
-  // Consider configured only if essential keys are present
-  return Boolean(env.VITE_FIREBASE_API_KEY && env.VITE_FIREBASE_PROJECT_ID);
+  return firebaseConfig.apiKey !== "your-api-key-here" && 
+         firebaseConfig.projectId !== "your-project-id" &&
+         firebaseConfig.apiKey && 
+         firebaseConfig.projectId;
+};
+
+// AI Photo Analysis (placeholder for future implementation)
+export const analyzeHabitPhoto = async (photoUrl, habitName, category) => {
+  // This is a placeholder for AI photo analysis
+  // In the future, this would call an AI service to verify the habit
+  
+  // Simulate AI analysis delay
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  // Mock AI response
+  const mockAnalysis = {
+    verified: Math.random() > 0.3, // 70% chance of verification
+    confidence: Math.random() * 0.4 + 0.6, // 60-100% confidence
+    description: `AI detected activity related to ${habitName} in the ${category} category`,
+    suggestions: [
+      'Great job on your eco-friendly activity!',
+      'Consider documenting the impact for better tracking',
+      'Share your achievement with the community'
+    ]
+  };
+  
+  return mockAnalysis;
 };
