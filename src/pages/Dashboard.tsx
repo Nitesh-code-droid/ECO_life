@@ -26,7 +26,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onProfileUpdate }) => {
   const [recentHabits, setRecentHabits] = useState(sampleUserData.habits);
-  
+
   // Use actual user profile data or fallback to sample data
   const currentProfile = userProfile || {
     ecoScore: sampleUserData.ecoScore,
@@ -64,7 +64,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
 
   const handleHabitAdded = (habit: any) => {
     setRecentHabits(prev => [habit, ...prev.slice(0, 4)]);
-    
+
     // Update user profile
     onProfileUpdate({
       greenCredits: currentProfile.greenCredits + habit.greenCredits,
@@ -94,7 +94,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
             <CardContent className="p-6 text-center">
               <Zap className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
               <div className="text-2xl font-bold text-emerald-400">{currentProfile.greenCredits}</div>
-              <p className="text-sm text-gray-300">Green Credits</p>
+              <p className="text-sm text-black-800">Green Credits</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -108,7 +108,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
             <CardContent className="p-6 text-center">
               <Leaf className="w-8 h-8 text-blue-400 mx-auto mb-2" />
               <div className="text-2xl font-bold text-blue-400">{currentProfile.totalCO2Saved.toFixed(1)}kg</div>
-              <p className="text-sm text-gray-300">CO₂ Saved</p>
+              <p className="text-sm text-black-800">CO₂ Saved</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -122,7 +122,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
             <CardContent className="p-6 text-center">
               <Target className="w-8 h-8 text-purple-400 mx-auto mb-2" />
               <div className="text-2xl font-bold text-purple-400">{currentProfile.streakDays}</div>
-              <p className="text-sm text-gray-300">Day Streak</p>
+              <p className="text-sm text-black-800">Day Streak</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -136,7 +136,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
             <CardContent className="p-6 text-center">
               <Award className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
               <div className="text-2xl font-bold text-yellow-400">Level {currentProfile.level}</div>
-              <p className="text-sm text-gray-300">Eco Level</p>
+              <p className="text-sm text-black-800">Eco Level</p>
             </CardContent>
           </Card>
         </motion.div>
@@ -147,7 +147,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
         {/* Left Column */}
         <div className="space-y-6">
           <HabitLogger userId={user?.uid || 'demo'} onHabitAdded={handleHabitAdded} />
-          
+
           {/* Weekly Progress Chart */}
           <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
             <CardHeader>
@@ -162,24 +162,24 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                   <XAxis dataKey="day" stroke="#9CA3AF" />
                   <YAxis stroke="#9CA3AF" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1F2937', 
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#1F2937',
                       border: '1px solid #10B981',
                       borderRadius: '8px',
                       color: '#fff'
-                    }} 
+                    }}
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="credits" 
-                    stroke="#10B981" 
-                    fill="url(#gradientCredits)" 
+                  <Area
+                    type="monotone"
+                    dataKey="credits"
+                    stroke="#10B981"
+                    fill="url(#gradientCredits)"
                   />
                   <defs>
                     <linearGradient id="gradientCredits" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#10B981" stopOpacity={0.1}/>
+                      <stop offset="5%" stopColor="#10B981" stopOpacity={0.8} />
+                      <stop offset="95%" stopColor="#10B981" stopOpacity={0.1} />
                     </linearGradient>
                   </defs>
                 </AreaChart>
@@ -191,7 +191,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
         {/* Right Column */}
         <div className="space-y-6">
           <CarbonAnalyzer onProductAnalyzed={handleProductAnalyzed} />
-          
+
           {/* Impact Categories */}
           <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
             <CardHeader>
@@ -262,7 +262,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
   const renderHabitsContent = () => (
     <div className="grid lg:grid-cols-2 gap-6">
       <HabitLogger userId={user?.uid || 'demo'} onHabitAdded={handleHabitAdded} />
-      
+
       <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
         <CardHeader>
           <CardTitle className="text-white">Monthly Trends</CardTitle>
@@ -273,25 +273,25 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
               <XAxis dataKey="month" stroke="#9CA3AF" />
               <YAxis stroke="#9CA3AF" />
-              <Tooltip 
-                contentStyle={{ 
-                  backgroundColor: '#1F2937', 
+              <Tooltip
+                contentStyle={{
+                  backgroundColor: '#1F2937',
                   border: '1px solid #10B981',
                   borderRadius: '8px',
                   color: '#fff'
-                }} 
+                }}
               />
-              <Line 
-                type="monotone" 
-                dataKey="credits" 
-                stroke="#10B981" 
+              <Line
+                type="monotone"
+                dataKey="credits"
+                stroke="#10B981"
                 strokeWidth={3}
                 dot={{ fill: '#10B981', strokeWidth: 2, r: 6 }}
               />
-              <Line 
-                type="monotone" 
-                dataKey="co2Saved" 
-                stroke="#06B6D4" 
+              <Line
+                type="monotone"
+                dataKey="co2Saved"
+                stroke="#06B6D4"
                 strokeWidth={3}
                 dot={{ fill: '#06B6D4', strokeWidth: 2, r: 6 }}
               />
@@ -303,7 +303,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
   );
 
   const renderRewardsContent = () => (
-    <RewardsSystem 
+    <RewardsSystem
       userCredits={currentProfile.greenCredits}
       userLevel={currentProfile.level}
       userBadges={currentProfile.badges}
@@ -331,7 +331,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
               <div className="text-sm text-gray-300">CO₂ Saved</div>
             </div>
           </div>
-          
+
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-white">Your Badges</h3>
             <div className="grid grid-cols-3 gap-3">
