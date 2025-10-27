@@ -1,69 +1,165 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-function mapProduct(name?: string) {
-    const p = (name || '').toLowerCase();
-    const map: Record<string, any> = {
-        apple: { emission_factor: { activity_id: 'food_apple' }, parameters: { mass: 0.2, mass_unit: 'kg' } },
-        banana: { emission_factor: { activity_id: 'food_banana' }, parameters: { mass: 0.2, mass_unit: 'kg' } },
-        beef: { emission_factor: { activity_id: 'food_beef' }, parameters: { mass: 0.15, mass_unit: 'kg' } },
-        'plastic bottle': { emission_factor: { activity_id: 'plastic_pet_bottle' }, parameters: { mass: 0.03, mass_unit: 'kg' } },
-        'electric car': {
-            emission_factor: { activity_id: 'passenger_vehicle-vehicle_type_car-fuel_source_electric' },
-            parameters: { distance: 10, distance_unit: 'km' }
-        },
-        'led bulb': {
-            emission_factor: { activity_id: 'electricity-energy_source_grid_mix', region: 'US' },
-            parameters: { energy: 1, energy_unit: 'kWh' }
-        },
-        'solar panel': {
-            emission_factor: { activity_id: 'electricity-energy_source_grid_mix', region: 'US' },
-            parameters: { energy: -1, energy_unit: 'kWh' }
-        },
-        'fast fashion': {
-            emission_factor: { activity_id: 'textiles_generic_garment' },
-            parameters: { mass: 0.5, mass_unit: 'kg' }
-        }
-    };
-    return map[p] || null;
+const API_KEY = "V1Z4DT9E9D3CDDQK3RA6FSQ0TM";
+const DATA_VERSION = "27.27";
+
+// Default quantities for each unit type
+const defaultValues: Record<string, { value: number; unit: string }> = {
+  mass: { value: 1, unit: "kg" },
+  distance: { value: 1, unit: "km" },
+  volume: { value: 1, unit: "l" },
+  energy: { value: 1, unit: "kWh" },
+};
+
+// Get alternatives based on product type
+function getAlternatives(productName: string): string[] {
+  const lowerName = productName.toLowerCase();
+  
+  if (lowerName.includes('beef') || lowerName.includes('meat')) {
+    return ["plant-based proteins", "chicken", "tofu", "lentils"];
+  }
+  if (lowerName.includes('plastic')) {
+    return ["glass containers", "reusable materials", "biodegradable options"];
+  }
+  if (lowerName.includes('car') || lowerName.includes('vehicle')) {
+    return ["public transportation", "bicycle", "electric vehicle"];
+  }
+  if (lowerName.includes('fashion') || lowerName.includes('clothing')) {
+    return ["sustainable brands", "secondhand", "clothing rental"];
+  }
+  
+  return ["eco-friendly alternatives", "sustainable options"];
+}
+
+// Detect parameter name from EF unit_type
+function getParameterForUnitType(unitType: string) {
+  if (unitType.includes("mass")) return "mass";
+  if (unitType.includes("distance")) return "distance";
+  if (unitType.includes("energy")) return "energy";
+  if (unitType.includes("volume")) return "volume";
+  return null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.status(204).end();
-    if (req.method !== 'POST') return res.status(405).send('Method Not Allowed');
+  // CORS headers
+  const origin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
 
-    const apiKey = process.env.CLIMATIQ_API_KEY;
-    if (!apiKey) return res.status(500).send('Missing CLIMATIQ_API_KEY');
+  const { productName } = req.body || {};
+  if (!productName) {
+    return res.status(400).json({ error: "Missing productName" });
+  }
 
-    try {
-        const { productName, customPayload } = req.body || {};
-        const payload = customPayload || mapProduct(productName);
-        if (!payload) return res.status(400).json({ error: 'Unsupported productName or missing payload' });
+  const normalizedProductName = productName.toLowerCase().trim();
 
-        const climatiqRes = await fetch('https://api.climatiq.io/estimate', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
+  try {
+    // Search for emission factor using Climatiq API
+    const searchUrl = `https://api.climatiq.io/data/v1/search?query=${encodeURIComponent(normalizedProductName)}`;
 
-        const data = await climatiqRes.json();
-        if (!climatiqRes.ok) {
-            return res.status(climatiqRes.status).json({ error: data?.message || 'Climatiq error', details: data });
-        }
+    const searchResponse = await fetch(searchUrl, {
+      headers: { 
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
 
-        const co2e = typeof data.co2e === 'number' ? data.co2e : null;
-        return res.status(200).json({
-            co2e,
-            co2e_unit: data.co2e_unit || 'kg',
-            isEcoFriendly: co2e !== null ? co2e < 5 : null,
-            alternatives: [],
-            raw: data
-        });
-    } catch (e: any) {
-        return res.status(500).json({ error: 'Server error', details: e?.message || String(e) });
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      return res.status(searchResponse.status).json({ 
+        error: 'Climatiq search API failed', 
+        details: errorText 
+      });
     }
+
+    const searchData = await searchResponse.json();
+    const firstResult = searchData.results?.[0];
+
+    if (!firstResult) {
+      return res.status(404).json({
+        error: `No emission factor found for "${productName}"`,
+        suggestion: "Try a more specific product name"
+      });
+    }
+
+    const { activity_id, unit_type } = firstResult;
+    const param = getParameterForUnitType(unit_type);
+
+    if (!param || !defaultValues[param]) {
+      return res.status(400).json({
+        error: `Unsupported unit type: ${unit_type}`,
+        activity_id: activity_id
+      });
+    }
+
+    const defaults = defaultValues[param];
+
+    // Estimate emissions using Climatiq API
+    const payload = {
+      emission_factor: {
+        activity_id,
+        data_version: DATA_VERSION
+      },
+      parameters: {
+        [param]: defaults.value,
+        [`${param}_unit`]: defaults.unit
+      }
+    };
+
+    const estimateResponse = await fetch("https://api.climatiq.io/data/v1/estimate", {
+      method: "POST",
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!estimateResponse.ok) {
+      const errorText = await estimateResponse.text();
+      return res.status(estimateResponse.status).json({ 
+        error: 'Climatiq estimate API failed', 
+        details: errorText 
+      });
+    }
+
+    const data = await estimateResponse.json();
+    
+    // Extract CO2e value
+    let co2e = 0;
+    let unit = "kg CO2e";
+    
+    if (typeof data.co2e === 'object' && data.co2e !== null) {
+      co2e = data.co2e.value || 0;
+      unit = data.co2e.unit || unit;
+    } else {
+      co2e = data.co2e || 0;
+    }
+
+    return res.status(200).json({
+      productName: normalizedProductName,
+      carbonFootprint: Number(co2e.toFixed(4)),
+      co2e_unit: unit,
+      isEcoFriendly: co2e < 5,
+      alternatives: getAlternatives(normalizedProductName),
+      activity_id: activity_id,
+      source: 'climatiq'
+    });
+
+  } catch (error: any) {
+    console.error('API Error:', error);
+    return res.status(500).json({
+      error: 'Internal server error',
+      details: error.message || String(error)
+    });
+  }
 }

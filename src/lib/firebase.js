@@ -71,6 +71,184 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
+// Carbon Footprint: Direct call to Climatiq API
+export const getCarbonFootprint = async (productName) => {
+  const API_KEY = "V1Z4DT9E9D3CDDQK3RA6FSQ0TM";
+  const DATA_VERSION = "27.27";
+
+  const defaultValues = {
+    mass: { value: 1, unit: "kg" },
+    distance: { value: 1, unit: "km" },
+    volume: { value: 1, unit: "l" },
+    energy: { value: 1, unit: "kWh" },
+    weight: { value: 1, unit: "kg" }, // Added for Weight unit type
+  };
+
+  const getParameterForUnitType = (unitType) => {
+    const lowerUnitType = unitType.toLowerCase();
+    console.log('🔍 Unit type received:', unitType, '→ Lower:', lowerUnitType);
+
+    if (lowerUnitType.includes("mass") || lowerUnitType.includes("weight")) return "mass";
+    if (lowerUnitType.includes("distance")) return "distance";
+    if (lowerUnitType.includes("energy")) return "energy";
+    if (lowerUnitType.includes("volume")) return "volume";
+    return null;
+  };
+
+  const getAlternatives = (productName) => {
+    const lowerName = productName.toLowerCase();
+    if (lowerName.includes('beef') || lowerName.includes('meat')) {
+      return ["plant-based proteins", "chicken", "tofu", "lentils"];
+    }
+    if (lowerName.includes('plastic')) {
+      return ["glass containers", "reusable materials", "biodegradable options"];
+    }
+    if (lowerName.includes('car') || lowerName.includes('vehicle')) {
+      return ["public transportation", "bicycle", "electric vehicle"];
+    }
+    if (lowerName.includes('fashion') || lowerName.includes('clothing')) {
+      return ["sustainable brands", "secondhand", "clothing rental"];
+    }
+    return ["eco-friendly alternatives", "sustainable options"];
+  };
+
+  try {
+    console.log('🌍 Calling Climatiq API for:', productName);
+    
+    const normalizedProductName = productName.toLowerCase().trim();
+
+    // Step 1: Search for emission factor
+    const searchUrl = `https://api.climatiq.io/data/v1/search?query=${encodeURIComponent(normalizedProductName)}&data_version=${DATA_VERSION}`;
+    
+    const searchResponse = await fetch(searchUrl, {
+      headers: { 
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+
+    if (!searchResponse.ok) {
+      const errorText = await searchResponse.text();
+      console.error('❌ Search API Error:', errorText);
+      throw new Error(`Search failed: ${searchResponse.status}`);
+    }
+
+    const searchData = await searchResponse.json();
+    console.log('🔍 Search results for', normalizedProductName, ':', searchData);
+
+    const firstResult = searchData.results?.[0];
+
+    if (!firstResult) {
+      console.error('❌ No results found for:', normalizedProductName);
+      throw new Error(`No emission factor found for "${productName}". Try: "diesel", "beef", "apple", "electric car"`);
+    }
+
+    console.log('✅ First result:', firstResult);
+    console.log('📋 Full first result details:', JSON.stringify(firstResult, null, 2));
+
+    const { activity_id, unit_type } = firstResult;
+    const param = getParameterForUnitType(unit_type);
+
+    if (!param || !defaultValues[param]) {
+      console.error('❌ Unsupported unit type:', unit_type, 'Available:', Object.keys(defaultValues));
+      throw new Error(`Unsupported unit type: ${unit_type}. Supported: ${Object.keys(defaultValues).join(', ')} (mass/weight → mass parameter)`);
+    }
+
+    console.log('✅ Mapped unit type', unit_type, 'to parameter:', param);
+    console.log('📊 Emission factor details:', {
+      activity_id,
+      unit_type,
+      param,
+      defaults: defaultValues[param]
+    });
+
+    const defaults = defaultValues[param];
+
+    // Step 2: Estimate emissions - try different parameter formats
+    let estimateResponse;
+    let successfulPayload;
+    const attempts = [
+      {
+        name: 'unit_type_direct',
+        payload: {
+          emission_factor: { activity_id, data_version: DATA_VERSION },
+          parameters: { [unit_type]: defaults.value }
+        }
+      },
+      {
+        name: 'mapped_with_unit',
+        payload: {
+          emission_factor: { activity_id, data_version: DATA_VERSION },
+          parameters: { [param]: defaults.value, [`${param}_unit`]: defaults.unit }
+        }
+      },
+      {
+        name: 'mapped_simple',
+        payload: {
+          emission_factor: { activity_id, data_version: DATA_VERSION },
+          parameters: { [param]: defaults.value }
+        }
+      }
+    ];
+
+    for (const attempt of attempts) {
+      console.log(`📤 Trying ${attempt.name}:`, JSON.stringify(attempt.payload, null, 2));
+
+      const response = await fetch("https://api.climatiq.io/data/v1/estimate", {
+        method: "POST",
+        headers: {
+          'Authorization': `Bearer ${API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(attempt.payload)
+      });
+
+      if (response.ok) {
+        console.log(`✅ ${attempt.name} payload worked!`);
+        estimateResponse = response;
+        successfulPayload = attempt.name;
+        break;
+      } else {
+        const errorText = await response.text();
+        console.error(`❌ ${attempt.name} failed:`, errorText);
+      }
+    }
+
+    if (!estimateResponse) {
+      throw new Error('All parameter formats failed. Check console logs for detailed error messages.');
+    }
+
+    console.log(`🎉 Success with ${successfulPayload} format!`);
+
+    const data = await estimateResponse.json();
+    console.log('✅ Final estimate response:', data);
+    
+    // Extract CO2e value
+    let co2e = 0;
+    let unit = "kg CO2e";
+    
+    if (typeof data.co2e === 'object' && data.co2e !== null) {
+      co2e = data.co2e.value || 0;
+      unit = data.co2e.unit || unit;
+    } else {
+      co2e = data.co2e || 0;
+    }
+
+    console.log('✅ API Response:', { co2e, unit, activity_id });
+
+    return {
+      carbonFootprint: Number(co2e.toFixed(4)),
+      isEcoFriendly: co2e < 5,
+      alternatives: getAlternatives(normalizedProductName),
+      co2e_unit: unit,
+      source: 'climatiq'
+    };
+  } catch (error) {
+    console.error('❌ Failed to fetch carbon footprint:', error);
+    throw error;
+  }
+};
+
 // Authentication functions
 export const signInWithGoogle = async () => {
   try {
@@ -278,67 +456,6 @@ export const updateHabitVerification = async (habitId, verified, aiAnalysis = nu
 };
 
 // Carbon Footprint: Prefer backend proxy (Climatiq via Firebase Functions) with safe fallback
-export const getCarbonFootprint = async (productName) => {
-  const functionUrl = import.meta.env.VITE_CLIMATIQ_FUNCTION_URL; // e.g., https://<region>-<project>.cloudfunctions.net/climatiqEstimate
-
-  // If a backend proxy URL is configured, use it. Otherwise, fall back to the existing mock logic below.
-  if (functionUrl && typeof fetch !== 'undefined') {
-    try {
-      const res = await fetch(functionUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productName })
-      });
-
-      if (!res.ok) throw new Error('Climatiq proxy request failed');
-      const data = await res.json();
-
-      // Expecting response like: { co2e: number, co2e_unit: 'kg', isEcoFriendly?: boolean, alternatives?: string[] }
-      const co2 = typeof data.co2e === 'number' ? data.co2e : Math.random() * 5;
-      return {
-        carbonFootprint: Number(co2.toFixed(2)),
-        isEcoFriendly: typeof data.isEcoFriendly === 'boolean' ? data.isEcoFriendly : co2 < 5,
-        alternatives: Array.isArray(data.alternatives) && data.alternatives.length > 0
-          ? data.alternatives
-          : ['eco-friendly alternative', 'sustainable option']
-      };
-    } catch (e) {
-      console.warn('Falling back to mock carbon footprint due to error:', e?.message || e);
-    }
-  }
-
-  // ===== BEGIN: Previous mock implementation (kept for easy rollback) =====
-  // // Simulate API call delay
-  // await new Promise(resolve => setTimeout(resolve, 1000));
-  // 
-  // // Mock carbon footprint data
-  // const mockData = {
-  //   'apple': { carbonFootprint: 0.3, isEcoFriendly: true, alternatives: ['organic apple', 'local apple'] },
-  //   'beef': { carbonFootprint: 27.0, isEcoFriendly: false, alternatives: ['plant-based protein', 'chicken', 'tofu'] },
-  //   'plastic bottle': { carbonFootprint: 0.5, isEcoFriendly: false, alternatives: ['reusable bottle', 'glass bottle'] },
-  //   'electric car': { carbonFootprint: 4.6, isEcoFriendly: true, alternatives: ['public transport', 'bicycle'] },
-  //   'solar panel': { carbonFootprint: -2.5, isEcoFriendly: true, alternatives: ['wind energy', 'hydroelectric'] },
-  //   'banana': { carbonFootprint: 0.7, isEcoFriendly: true, alternatives: ['local fruit', 'seasonal fruit'] },
-  //   'fast fashion': { carbonFootprint: 8.1, isEcoFriendly: false, alternatives: ['sustainable clothing', 'second-hand', 'organic cotton'] },
-  //   'led bulb': { carbonFootprint: 0.1, isEcoFriendly: true, alternatives: ['natural lighting', 'energy star bulbs'] }
-  // };
-  //
-  // const product = (productName || '').toLowerCase();
-  // return mockData[product] || { 
-  //   carbonFootprint: Math.random() * 10, 
-  //   isEcoFriendly: Math.random() > 0.5,
-  //   alternatives: ['eco-friendly alternative', 'sustainable option']
-  // };
-  // ===== END: Previous mock implementation =====
-
-  // Minimal non-blocking fallback if no proxy is configured
-  const mockValue = Math.random() * 10;
-  return {
-    carbonFootprint: Number(mockValue.toFixed(2)),
-    isEcoFriendly: mockValue < 5,
-    alternatives: ['eco-friendly alternative', 'sustainable option']
-  };
-};
 
 // Sample user data for demo/fallback
 export const sampleUserData = {
