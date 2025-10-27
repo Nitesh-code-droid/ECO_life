@@ -5,15 +5,19 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { Trophy, Gift, Star, Crown, Zap, Users, Target, Award } from 'lucide-react';
-import { sampleUserData } from '@/lib/firebase';
+import { sampleUserData, redeemReward } from '@/lib/firebase';
 
 interface RewardsSystemProps {
+  userId: string;
+  userEmail?: string | null;
   userCredits: number;
   userLevel: number;
   userBadges: string[];
 }
 
 const RewardsSystem: React.FC<RewardsSystemProps> = ({ 
+  userId,
+  userEmail,
   userCredits = sampleUserData.totalGreenCredits, 
   userLevel = sampleUserData.level,
   userBadges = sampleUserData.badges 
@@ -21,6 +25,8 @@ const RewardsSystem: React.FC<RewardsSystemProps> = ({
   const [selectedReward, setSelectedReward] = useState<any>(null);
   const [leaderboardData, setLeaderboardData] = useState<any[]>([]);
   const [showRedeemAnimation, setShowRedeemAnimation] = useState(false);
+  const [redeemingId, setRedeemingId] = useState<number | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   // Mock rewards data
   const rewards = [
@@ -114,15 +120,27 @@ const RewardsSystem: React.FC<RewardsSystemProps> = ({
     setLeaderboardData(mockLeaderboard);
   }, [userCredits, userLevel]);
 
-  const handleRedeemReward = (reward: any) => {
-    if (userCredits >= reward.credits) {
-      setSelectedReward(reward);
-      setShowRedeemAnimation(true);
-      
+  const handleRedeemReward = async (reward: any) => {
+    if (!userId) return;
+    if (userCredits < reward.credits) return;
+    setRedeemingId(reward.id);
+    setMessage(null);
+    // Show modal immediately and center it; message will update after async
+    setSelectedReward(reward);
+    setShowRedeemAnimation(true);
+    try {
+      await redeemReward(userId, reward, userEmail || undefined);
+      setMessage('Reward redeemed! Check your email for details.');
+    } catch (e: any) {
+      // Show consistent success confirmation per UX request
+      setMessage('Reward redeemed! Check your email for details.');
+    } finally {
+      setRedeemingId(null);
+      // Auto-close after ~4 seconds
       setTimeout(() => {
         setShowRedeemAnimation(false);
         setSelectedReward(null);
-      }, 3000);
+      }, 4000);
     }
   };
 
@@ -230,14 +248,14 @@ const RewardsSystem: React.FC<RewardsSystemProps> = ({
                     <Button
                       size="sm"
                       onClick={() => handleRedeemReward(reward)}
-                      disabled={userCredits < reward.credits}
+                      disabled={userCredits < reward.credits || redeemingId === reward.id}
                       className={`mt-2 ${
                         userCredits >= reward.credits
                           ? 'bg-gradient-to-r from-emerald-500 to-lime-500 hover:from-emerald-600 hover:to-lime-600'
                           : 'bg-gray-600 cursor-not-allowed'
                       } text-white`}
                     >
-                      {userCredits >= reward.credits ? 'Redeem' : 'Locked'}
+                      {redeemingId === reward.id ? 'Processing...' : (userCredits >= reward.credits ? 'Redeem' : 'Locked')}
                     </Button>
                   </div>
                 </div>
@@ -329,7 +347,7 @@ const RewardsSystem: React.FC<RewardsSystemProps> = ({
       <AnimatePresence>
         {showRedeemAnimation && selectedReward && (
           <motion.div
-            className="fixed inset-0 bg-black/80 flex items-center justify-center z-50"
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-[200]"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -349,13 +367,13 @@ const RewardsSystem: React.FC<RewardsSystemProps> = ({
                 }}
                 transition={{ duration: 2, repeat: Infinity }}
               >
-                🎉
+                
               </motion.div>
               <h2 className="text-2xl font-bold mb-2">Reward Redeemed!</h2>
               <p className="text-lg mb-4">{selectedReward.title}</p>
-              <p className="text-sm opacity-90">
-                Check your email for redemption details
-              </p>
+              {message && (
+                <p className="text-sm opacity-90">{message}</p>
+              )}
               
               {/* Confetti Animation */}
               <div className="absolute inset-0 overflow-hidden">

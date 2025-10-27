@@ -1,7 +1,7 @@
 // Firebase configuration and API integrations
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc, onSnapshot, increment } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc, onSnapshot, increment, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 // Firebase config - Using VITE_ prefix for Vite environment variables
@@ -13,6 +13,51 @@ const firebaseConfig = {
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "837150090249",
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:837150090249:web:f0d7af6b2cf70b85ca84d8",
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-06P5ZDPJH5"
+};
+
+// Redeem a reward: deduct credits atomically, log redemption, and trigger email via optional webhook
+export const redeemReward = async (userId, reward, userEmail) => {
+  if (!userId || !reward?.credits) throw new Error('Invalid redemption request');
+  // 1) Check current profile to ensure sufficient credits
+  const profile = await getUserProfile(userId);
+  const current = Number(profile?.greenCredits || 0);
+  const cost = Number(reward.credits);
+  if (current < cost) throw new Error('Insufficient credits');
+
+  // 2) Atomically deduct credits
+  const userRef = doc(db, 'users', userId);
+  await setDoc(userRef, { greenCredits: increment(-cost) }, { merge: true });
+
+  // 3) Log redemption
+  await addDoc(collection(db, 'redemptions'), {
+    userId,
+    userEmail: userEmail || null,
+    rewardId: reward.id,
+    title: reward.title,
+    credits: cost,
+    createdAt: serverTimestamp(),
+    status: 'pending_email'
+  });
+
+  // 4) Optional: trigger email via webhook/function if provided
+  const webhook = import.meta.env.VITE_REDEMPTION_WEBHOOK;
+  if (webhook && typeof fetch !== 'undefined') {
+    try {
+      await fetch(webhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId,
+          email: userEmail,
+          reward: { id: reward.id, title: reward.title, credits: cost },
+        })
+      });
+    } catch (e) {
+      console.warn('Redemption webhook failed:', e?.message || e);
+    }
+  }
+
+  return { remaining: current - cost };
 };
 
 // Initialize Firebase

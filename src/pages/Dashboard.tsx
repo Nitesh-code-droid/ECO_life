@@ -125,12 +125,37 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
     return order.map((day) => ({ day, credits: sums[day].credits, co2Saved: Number(sums[day].co2Saved.toFixed(2)) }));
   }, [recentHabits]);
 
-  const monthlyData = [
-    { month: 'Jan', credits: 180, co2Saved: 25.4 },
-    { month: 'Feb', credits: 220, co2Saved: 32.1 },
-    { month: 'Mar', credits: 195, co2Saved: 28.7 },
-    { month: 'Apr', credits: currentProfile.greenCredits, co2Saved: currentProfile.totalCO2Saved }
-  ];
+  const monthlyData = useMemo(() => {
+    const now = new Date();
+    const windowMonths: { key: string; label: string; year: number; monthIndex: number }[] = [];
+    const pad = (n: number) => (n < 10 ? `0${n}` : `${n}`);
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${pad(d.getMonth())}`;
+      const label = d.toLocaleString(undefined, { month: 'short' });
+      windowMonths.push({ key, label, year: d.getFullYear(), monthIndex: d.getMonth() });
+    }
+
+    const sums: Record<string, { credits: number; co2Saved: number }> = {};
+    for (const m of windowMonths) sums[m.key] = { credits: 0, co2Saved: 0 };
+
+    for (const habit of recentHabits) {
+      const t = habit.timestamp ?? habit.date;
+      const d = t?.toDate ? t.toDate() : (t instanceof Date ? t : (typeof t === 'number' ? new Date(t) : new Date(String(t))));
+      if (!(d instanceof Date) || isNaN(d.getTime())) continue;
+      const k = `${d.getFullYear()}-${pad(d.getMonth())}`;
+      if (!sums[k]) continue;
+      const c = Number(habit.greenCredits || 0);
+      sums[k].credits += c;
+      sums[k].co2Saved += c * 0.2;
+    }
+
+    return windowMonths.map(m => ({
+      month: m.label,
+      credits: sums[m.key].credits,
+      co2Saved: Number(sums[m.key].co2Saved.toFixed(2))
+    }));
+  }, [recentHabits]);
 
   const totalWeeklyCredits = useMemo(() => {
     return weeklyData.reduce((sum, d) => sum + (Number(d.credits) || 0), 0);
@@ -419,6 +444,8 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
 
   const renderRewardsContent = () => (
     <RewardsSystem
+      userId={user?.uid || ''}
+      userEmail={user?.email || null}
       userCredits={currentProfile.greenCredits}
       userLevel={currentProfile.level}
       userBadges={currentProfile.badges}

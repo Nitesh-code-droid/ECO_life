@@ -1,0 +1,15 @@
+/* Stabilize layout to avoid navbar shifting due to scrollbar appearance */
+html, body, #root {
+  height: 100%;
+}
+
+/* Always reserve space for vertical scrollbar */
+html {
+  overflow-y: scroll;
+  scrollbar-gutter: stable both-edges; /* modern browsers */
+}
+
+body {
+  margin: 0;
+  background-color: #000; /* ensures no flash of white */
+}
