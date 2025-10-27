@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Plus, Leaf, Car, Utensils, Zap, Trash2, Camera, Upload, X, Check, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { addHabit } from '@/lib/firebase';
-import { uploadHabitPhoto, compressImage } from '@/lib/storage';
+import { uploadHabitPhotoResumable, uploadHabitPhoto, compressImage } from '@/lib/storage';
 
 interface HabitLoggerProps {
   userId: string;
@@ -24,6 +24,7 @@ interface PhotoUpload {
   uploading?: boolean;
   uploaded?: boolean;
   url?: string;
+  progress?: number;
 }
 
 const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
@@ -147,15 +148,19 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
       if (photo.uploaded && photo.url) return photo.url;
       
       setPhotos(prev => prev.map((p, i) => 
-        i === index ? { ...p, uploading: true } : p
+        i === index ? { ...p, uploading: true, progress: 0 } : p
       ));
 
       try {
         const fileToUpload = photo.compressed || photo.file;
-        const url = await uploadHabitPhoto(userId, fileToUpload);
+        const url = await uploadHabitPhotoResumable(userId, fileToUpload, (progress) => {
+          setPhotos(prev => prev.map((p, i) => 
+            i === index ? { ...p, progress } : p
+          ));
+        });
         
         setPhotos(prev => prev.map((p, i) => 
-          i === index ? { ...p, uploading: false, uploaded: true, url } : p
+          i === index ? { ...p, uploading: false, uploaded: true, url, progress: 100 } : p
         ));
         
         return url;
@@ -181,11 +186,18 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
     setIsSubmitting(true);
 
     try {
-      // Upload photos first
+      // Upload photos first (non-blocking fail: proceed without photos on error)
       let photoUrls: string[] = [];
       if (photos.length > 0) {
         toast.info('Uploading photos...', { duration: 2000 });
-        photoUrls = await uploadPhotos();
+        try {
+          photoUrls = await uploadPhotos();
+        } catch (err) {
+          toast.warning('Photo upload failed or timed out. Proceeding without photos.');
+          // Clear uploading flags to stop spinners
+          setPhotos(prev => prev.map(p => ({ ...p, uploading: false })));
+          photoUrls = [];
+        }
       }
 
       const selectedCategory = categories.find(cat => cat.id === category);

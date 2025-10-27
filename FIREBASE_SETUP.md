@@ -42,15 +42,15 @@ This guide will help you set up Firebase authentication for the EcoLife app.
 ## Step 5: Configure Your App
 
 1. In your project root, create a `.env` file (copy from `.env.example`)
-2. Replace the placeholder values with your actual Firebase config:
+2. Replace the placeholder values with your actual Firebase config (Vite uses `VITE_`):
 
 ```env
-REACT_APP_FIREBASE_API_KEY=AIzaSyC...your-actual-api-key
-REACT_APP_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
-REACT_APP_FIREBASE_PROJECT_ID=your-actual-project-id
-REACT_APP_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
-REACT_APP_FIREBASE_MESSAGING_SENDER_ID=123456789012
-REACT_APP_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
+VITE_FIREBASE_API_KEY=AIzaSyC...your-actual-api-key
+VITE_FIREBASE_AUTH_DOMAIN=your-project-id.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=your-actual-project-id
+VITE_FIREBASE_STORAGE_BUCKET=your-project-id.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789012
+VITE_FIREBASE_APP_ID=1:123456789012:web:abcdef123456
 ```
 
 ## Step 6: Set Up Firestore Security Rules
@@ -104,7 +104,7 @@ service cloud.firestore {
 3. **Environment variables not loading**
    - Make sure your `.env` file is in the project root
    - Restart your development server after creating `.env`
-   - Environment variables must start with `REACT_APP_`
+   - Environment variables must start with `VITE_` (Vite requirement)
 
 4. **Firestore permission errors**
    - Check that your security rules are properly configured

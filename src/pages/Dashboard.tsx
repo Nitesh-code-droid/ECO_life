@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { LineChart, Line, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { Calendar, TrendingUp, Leaf, Zap, Target, Award } from 'lucide-react';
 import HabitLogger from '@/components/HabitLogger';
 import CarbonAnalyzer from '@/components/CarbonAnalyzer';
 import RewardsSystem from '@/components/RewardsSystem';
-import { sampleUserData } from '@/lib/firebase';
+import { sampleUserData, getUserHabits, getUserProfile, subscribeUserHabits } from '@/lib/firebase';
 
 interface UserProfile {
   ecoScore: number;
@@ -25,28 +26,104 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onProfileUpdate }) => {
-  const [recentHabits, setRecentHabits] = useState(sampleUserData.habits);
+  const [recentHabits, setRecentHabits] = useState([] as any[]);
 
-  // Use actual user profile data or fallback to sample data
+  useEffect(() => {
+    if (!user?.uid) return;
+    const key = `habits:${user.uid}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) {
+        const cached = JSON.parse(raw) as any[];
+        const normalized = cached.map((h: any) => ({
+          ...h,
+          date: new Date(h.date || h.timestamp || Date.now())
+        }));
+        setRecentHabits(normalized);
+      }
+    } catch {}
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const unsub = subscribeUserHabits(user.uid, (items: any[]) => {
+      const normalized = items.map((h: any) => {
+        let dt: Date | null = null;
+        const t = h.timestamp ?? h.date;
+        if (t?.toDate) {
+          dt = t.toDate();
+        } else if (t instanceof Date) {
+          dt = t;
+        } else if (typeof t === 'number') {
+          dt = new Date(t);
+        } else if (typeof t === 'string') {
+          dt = new Date(t);
+        }
+        return {
+          ...h,
+          date: dt || new Date(),
+        };
+      });
+      setRecentHabits(normalized);
+    });
+    return () => unsub && unsub();
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    const key = `habits:${user.uid}`;
+    try {
+      const serializable = recentHabits.map((h: any) => ({
+        ...h,
+        date: (h.date instanceof Date ? h.date : new Date(h.date)).toISOString(),
+      }));
+      localStorage.setItem(key, JSON.stringify(serializable));
+    } catch {}
+  }, [recentHabits, user?.uid]);
+
+  // Use actual user profile data or fallback to zeroed defaults
   const currentProfile = userProfile || {
-    ecoScore: sampleUserData.ecoScore,
-    greenCredits: sampleUserData.totalGreenCredits,
-    level: sampleUserData.level,
-    totalCO2Saved: sampleUserData.totalCO2Saved,
-    streakDays: sampleUserData.streakDays,
-    badges: sampleUserData.badges
+    ecoScore: 0,
+    greenCredits: 0,
+    level: 1,
+    totalCO2Saved: 0,
+    streakDays: 0,
+    badges: [] as string[]
   };
 
-  // Mock data for charts
-  const weeklyData = [
-    { day: 'Mon', credits: 15, co2Saved: 2.3 },
-    { day: 'Tue', credits: 22, co2Saved: 3.1 },
-    { day: 'Wed', credits: 18, co2Saved: 2.8 },
-    { day: 'Thu', credits: 25, co2Saved: 4.2 },
-    { day: 'Fri', credits: 30, co2Saved: 5.1 },
-    { day: 'Sat', credits: 35, co2Saved: 6.3 },
-    { day: 'Sun', credits: 28, co2Saved: 4.7 }
-  ];
+  // Weekly progress from current week's habits
+  const weeklyData = useMemo(() => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const today = new Date();
+    const startOfWeek = new Date(today);
+    const dayIdx = today.getDay();
+    startOfWeek.setDate(today.getDate() - dayIdx); // Sunday as start
+    startOfWeek.setHours(0, 0, 0, 0);
+
+    const sums: Record<string, { credits: number; co2Saved: number }> = {
+      Sun: { credits: 0, co2Saved: 0 },
+      Mon: { credits: 0, co2Saved: 0 },
+      Tue: { credits: 0, co2Saved: 0 },
+      Wed: { credits: 0, co2Saved: 0 },
+      Thu: { credits: 0, co2Saved: 0 },
+      Fri: { credits: 0, co2Saved: 0 },
+      Sat: { credits: 0, co2Saved: 0 }
+    };
+
+    for (const habit of recentHabits) {
+      const d = new Date(habit.date || habit.timestamp || Date.now());
+      const inWeek = d >= startOfWeek && d <= new Date(startOfWeek.getTime() + 7 * 24 * 60 * 60 * 1000);
+      if (!inWeek) continue;
+      const key = days[d.getDay()] as keyof typeof sums;
+      const credits = Number(habit.greenCredits || 0);
+      sums[key].credits += credits;
+      sums[key].co2Saved += credits * 0.2;
+    }
+
+    // Return in Mon..Sun order to match UI label sequence
+    const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+    return order.map((day) => ({ day, credits: sums[day].credits, co2Saved: Number(sums[day].co2Saved.toFixed(2)) }));
+  }, [recentHabits]);
 
   const monthlyData = [
     { month: 'Jan', credits: 180, co2Saved: 25.4 },
@@ -55,21 +132,40 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
     { month: 'Apr', credits: currentProfile.greenCredits, co2Saved: currentProfile.totalCO2Saved }
   ];
 
-  const categoryData = [
-    { name: 'Transportation', value: 35, color: '#10B981' },
-    { name: 'Energy', value: 25, color: '#F59E0B' },
-    { name: 'Food', value: 20, color: '#8B5CF6' },
-    { name: 'Waste', value: 20, color: '#06B6D4' }
-  ];
+  const totalWeeklyCredits = useMemo(() => {
+    return weeklyData.reduce((sum, d) => sum + (Number(d.credits) || 0), 0);
+  }, [weeklyData]);
 
-  const handleHabitAdded = (habit: any) => {
-    setRecentHabits(prev => [habit, ...prev.slice(0, 4)]);
+  const categoryData = useMemo(() => {
+    const totals = {
+      transportation: 0,
+      energy: 0,
+      food: 0,
+      waste: 0
+    };
 
-    // Update user profile
-    onProfileUpdate({
-      greenCredits: currentProfile.greenCredits + habit.greenCredits,
-      totalCO2Saved: currentProfile.totalCO2Saved + (habit.greenCredits * 0.2)
-    });
+    for (const habit of recentHabits) {
+      const credits = Number(habit.greenCredits || 0);
+      const cat: string = habit.category || '';
+      if (cat === 'transportation') totals.transportation += credits;
+      else if (cat === 'energy') totals.energy += credits;
+      else if (cat === 'food') totals.food += credits;
+      else if (cat === 'waste-reduction') totals.waste += credits;
+    }
+
+    return [
+      { name: 'Transportation', value: totals.transportation, color: '#10B981' },
+      { name: 'Energy', value: totals.energy, color: '#F59E0B' },
+      { name: 'Food', value: totals.food, color: '#8B5CF6' },
+      { name: 'Waste', value: totals.waste, color: '#06B6D4' }
+    ];
+  }, [recentHabits]);
+
+  const handleHabitAdded = async (habit: any) => {
+    // Optimistic update so chart updates immediately; snapshot will resync
+    const t = habit?.timestamp ?? habit?.date ?? new Date();
+    const dt = t?.toDate ? t.toDate() : (t instanceof Date ? t : (typeof t === 'number' ? new Date(t) : new Date(String(t))));
+    setRecentHabits(prev => [{ ...habit, date: dt }, ...prev]);
   };
 
   const handleProductAnalyzed = (product: any) => {
@@ -151,17 +247,26 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
           {/* Weekly Progress Chart */}
           <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
             <CardHeader>
-              <CardTitle className="text-white flex items-center space-x-2">
-                <TrendingUp className="w-5 h-5 text-emerald-400" />
-                <span>Weekly Progress</span>
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-white flex items-center space-x-2">
+                  <TrendingUp className="w-5 h-5 text-emerald-400" />
+                  <span>Weekly Progress</span>
+                </CardTitle>
+                <div className="text-xs px-2 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300">Total: {totalWeeklyCredits} credits</div>
+              </div>
             </CardHeader>
             <CardContent>
               <ResponsiveContainer width="100%" height={200}>
                 <AreaChart data={weeklyData}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                   <XAxis dataKey="day" stroke="#9CA3AF" />
-                  <YAxis stroke="#9CA3AF" />
+                  <YAxis yAxisId="left" stroke="#9CA3AF" />
+                  <YAxis
+                    yAxisId="right"
+                    orientation="right"
+                    stroke="#9CA3AF"
+                    tickFormatter={(v) => `${v}kg`}
+                  />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: '#1F2937',
@@ -170,11 +275,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
                       color: '#fff'
                     }}
                   />
+                  <Legend verticalAlign="top" height={24} wrapperStyle={{ color: '#fff' }} />
                   <Area
                     type="monotone"
                     dataKey="credits"
                     stroke="#10B981"
                     fill="url(#gradientCredits)"
+                    yAxisId="left"
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="co2Saved"
+                    stroke="#06B6D4"
+                    strokeWidth={3}
+                    dot={{ r: 3, fill: '#06B6D4' }}
+                    yAxisId="right"
                   />
                   <defs>
                     <linearGradient id="gradientCredits" x1="0" y1="0" x2="0" y2="1">
