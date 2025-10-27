@@ -31,11 +31,11 @@ export const signInWithGoogle = async () => {
   try {
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
-    
+
     // Create or update user profile in Firestore
     const userRef = doc(db, 'users', user.uid);
     const userDoc = await getDoc(userRef);
-    
+
     if (!userDoc.exists()) {
       // New user - create profile with default values
       await setDoc(userRef, {
@@ -58,7 +58,7 @@ export const signInWithGoogle = async () => {
         lastLoginAt: new Date()
       }, { merge: true });
     }
-    
+
     return user;
   } catch (error) {
     console.error("Error signing in with Google:", error);
@@ -80,7 +80,7 @@ export const getUserProfile = async (userId) => {
   try {
     const userRef = doc(db, 'users', userId);
     const userDoc = await getDoc(userRef);
-    
+
     if (userDoc.exists()) {
       return userDoc.data();
     } else {
@@ -123,14 +123,14 @@ export const addHabit = async (userId, habitData) => {
       hasPhotos: (habitData.photos && habitData.photos.length > 0) || false,
       verified: false // Will be verified by AI later
     });
-    
+
     // Update user's total green credits
     const userProfile = await getUserProfile(userId);
     await updateUserProfile(userId, {
       greenCredits: (userProfile.greenCredits || 0) + (habitData.greenCredits || 5),
       totalCO2Saved: (userProfile.totalCO2Saved || 0) + ((habitData.greenCredits || 5) * 0.2)
     });
-    
+
     return docRef.id;
   } catch (error) {
     console.error("Error adding habit:", error);
@@ -186,27 +186,65 @@ export const updateHabitVerification = async (habitId, verified, aiAnalysis = nu
   }
 };
 
-// Mock Carbon Footprint API (for demo purposes)
+// Carbon Footprint: Prefer backend proxy (Climatiq via Firebase Functions) with safe fallback
 export const getCarbonFootprint = async (productName) => {
-  // Simulate API call delay
-  await new Promise(resolve => setTimeout(resolve, 1000));
-  
-  // Mock carbon footprint data
-  const mockData = {
-    'apple': { carbonFootprint: 0.3, isEcoFriendly: true, alternatives: ['organic apple', 'local apple'] },
-    'beef': { carbonFootprint: 27.0, isEcoFriendly: false, alternatives: ['plant-based protein', 'chicken', 'tofu'] },
-    'plastic bottle': { carbonFootprint: 0.5, isEcoFriendly: false, alternatives: ['reusable bottle', 'glass bottle'] },
-    'electric car': { carbonFootprint: 4.6, isEcoFriendly: true, alternatives: ['public transport', 'bicycle'] },
-    'solar panel': { carbonFootprint: -2.5, isEcoFriendly: true, alternatives: ['wind energy', 'hydroelectric'] },
-    'banana': { carbonFootprint: 0.7, isEcoFriendly: true, alternatives: ['local fruit', 'seasonal fruit'] },
-    'fast fashion': { carbonFootprint: 8.1, isEcoFriendly: false, alternatives: ['sustainable clothing', 'second-hand', 'organic cotton'] },
-    'led bulb': { carbonFootprint: 0.1, isEcoFriendly: true, alternatives: ['natural lighting', 'energy star bulbs'] }
-  };
+  const functionUrl = import.meta.env.VITE_CLIMATIQ_FUNCTION_URL; // e.g., https://<region>-<project>.cloudfunctions.net/climatiqEstimate
 
-  const product = productName.toLowerCase();
-  return mockData[product] || { 
-    carbonFootprint: Math.random() * 10, 
-    isEcoFriendly: Math.random() > 0.5,
+  // If a backend proxy URL is configured, use it. Otherwise, fall back to the existing mock logic below.
+  if (functionUrl && typeof fetch !== 'undefined') {
+    try {
+      const res = await fetch(functionUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productName })
+      });
+
+      if (!res.ok) throw new Error('Climatiq proxy request failed');
+      const data = await res.json();
+
+      // Expecting response like: { co2e: number, co2e_unit: 'kg', isEcoFriendly?: boolean, alternatives?: string[] }
+      const co2 = typeof data.co2e === 'number' ? data.co2e : Math.random() * 5;
+      return {
+        carbonFootprint: Number(co2.toFixed(2)),
+        isEcoFriendly: typeof data.isEcoFriendly === 'boolean' ? data.isEcoFriendly : co2 < 5,
+        alternatives: Array.isArray(data.alternatives) && data.alternatives.length > 0
+          ? data.alternatives
+          : ['eco-friendly alternative', 'sustainable option']
+      };
+    } catch (e) {
+      console.warn('Falling back to mock carbon footprint due to error:', e?.message || e);
+    }
+  }
+
+  // ===== BEGIN: Previous mock implementation (kept for easy rollback) =====
+  // // Simulate API call delay
+  // await new Promise(resolve => setTimeout(resolve, 1000));
+  // 
+  // // Mock carbon footprint data
+  // const mockData = {
+  //   'apple': { carbonFootprint: 0.3, isEcoFriendly: true, alternatives: ['organic apple', 'local apple'] },
+  //   'beef': { carbonFootprint: 27.0, isEcoFriendly: false, alternatives: ['plant-based protein', 'chicken', 'tofu'] },
+  //   'plastic bottle': { carbonFootprint: 0.5, isEcoFriendly: false, alternatives: ['reusable bottle', 'glass bottle'] },
+  //   'electric car': { carbonFootprint: 4.6, isEcoFriendly: true, alternatives: ['public transport', 'bicycle'] },
+  //   'solar panel': { carbonFootprint: -2.5, isEcoFriendly: true, alternatives: ['wind energy', 'hydroelectric'] },
+  //   'banana': { carbonFootprint: 0.7, isEcoFriendly: true, alternatives: ['local fruit', 'seasonal fruit'] },
+  //   'fast fashion': { carbonFootprint: 8.1, isEcoFriendly: false, alternatives: ['sustainable clothing', 'second-hand', 'organic cotton'] },
+  //   'led bulb': { carbonFootprint: 0.1, isEcoFriendly: true, alternatives: ['natural lighting', 'energy star bulbs'] }
+  // };
+  //
+  // const product = (productName || '').toLowerCase();
+  // return mockData[product] || { 
+  //   carbonFootprint: Math.random() * 10, 
+  //   isEcoFriendly: Math.random() > 0.5,
+  //   alternatives: ['eco-friendly alternative', 'sustainable option']
+  // };
+  // ===== END: Previous mock implementation =====
+
+  // Minimal non-blocking fallback if no proxy is configured
+  const mockValue = Math.random() * 10;
+  return {
+    carbonFootprint: Number(mockValue.toFixed(2)),
+    isEcoFriendly: mockValue < 5,
     alternatives: ['eco-friendly alternative', 'sustainable option']
   };
 };
@@ -229,20 +267,20 @@ export const sampleUserData = {
 
 // Check if Firebase is properly configured
 export const isFirebaseConfigured = () => {
-  return firebaseConfig.apiKey !== "your-api-key-here" && 
-         firebaseConfig.projectId !== "your-project-id" &&
-         firebaseConfig.apiKey && 
-         firebaseConfig.projectId;
+  return firebaseConfig.apiKey !== "your-api-key-here" &&
+    firebaseConfig.projectId !== "your-project-id" &&
+    firebaseConfig.apiKey &&
+    firebaseConfig.projectId;
 };
 
 // AI Photo Analysis (placeholder for future implementation)
 export const analyzeHabitPhoto = async (photoUrl, habitName, category) => {
   // This is a placeholder for AI photo analysis
   // In the future, this would call an AI service to verify the habit
-  
+
   // Simulate AI analysis delay
   await new Promise(resolve => setTimeout(resolve, 2000));
-  
+
   // Mock AI response
   const mockAnalysis = {
     verified: Math.random() > 0.3, // 70% chance of verification
@@ -254,6 +292,6 @@ export const analyzeHabitPhoto = async (photoUrl, habitName, category) => {
       'Share your achievement with the community'
     ]
   };
-  
+
   return mockAnalysis;
 };
