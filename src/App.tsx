@@ -3,17 +3,12 @@ import { motion } from 'framer-motion';
 import { Toaster } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, getUserProfile, isFirebaseConfigured } from '@/lib/firebase';
+import { auth, getUserProfile, isFirebaseConfigured, updateUserProfile, subscribeUserProfile } from '@/lib/firebase';
+
 import TubelightNavbar from '@/components/TubelightNavbar';
 import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
 import './App.css';
-
-interface AppUser extends User {
-  displayName?: string | null;
-  email?: string | null;
-  photoURL?: string | null;
-}
 
 interface UserProfile {
   ecoScore: number;
@@ -25,38 +20,61 @@ interface UserProfile {
 }
 
 const App = () => {
-  const [user, setUser] = useState<AppUser | null>(null);
+  const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const firebaseConfigured = isFirebaseConfigured();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUser(user);
-        
-        // Fetch user profile data
+    let unsubProfile: (() => void) | null = null;
+    const unsubscribeAuth = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        setUser(u);
+        // Start real-time profile subscription
         try {
-          const profile = await getUserProfile(user.uid);
-          setUserProfile(profile);
+          if (unsubProfile) unsubProfile();
+          unsubProfile = subscribeUserProfile(u.uid, (profile) => {
+            setUserProfile(profile as UserProfile);
+          });
         } catch (error) {
-          console.error('Error fetching user profile:', error);
+          console.error('Error subscribing to user profile:', error);
+          // Fallback: one-time fetch
+          try {
+            const profile = await getUserProfile(u.uid);
+            setUserProfile(profile as UserProfile);
+          } catch {}
         }
       } else {
         setUser(null);
         setUserProfile(null);
+        if (unsubProfile) {
+          unsubProfile();
+          unsubProfile = null;
+        }
       }
       setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      if (unsubProfile) unsubProfile();
+      unsubscribeAuth();
+    };
   }, []);
 
-  // Update user profile when data changes
-  const updateProfile = (newProfileData: Partial<UserProfile>) => {
-    if (userProfile) {
-      setUserProfile({ ...userProfile, ...newProfileData });
+  // Update user profile when data changes (persist to Firestore to survive refresh)
+  const updateProfile = async (newProfileData: Partial<UserProfile>) => {
+    if (!user) return;
+    try {
+      await updateUserProfile(user.uid, newProfileData);
+      if (userProfile) {
+        setUserProfile({ ...userProfile, ...newProfileData });
+      } else {
+        setUserProfile(newProfileData as UserProfile);
+      }
+    } catch (e) {
+      // still update local state to keep UI responsive
+      if (userProfile) setUserProfile({ ...userProfile, ...newProfileData });
     }
   };
 

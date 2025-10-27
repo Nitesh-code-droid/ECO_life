@@ -1,7 +1,7 @@
 // Firebase configuration and API integrations
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc, onSnapshot, increment } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 
 // Firebase config - Using VITE_ prefix for Vite environment variables
@@ -9,7 +9,7 @@ const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyDLLdkSkHwcQwKGiMfvGYy0oOOw6t4dd04",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "ecolife-d8306.firebaseapp.com",
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "ecolife-d8306",
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ecolife-d8306.firebasestorage.app",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "ecolife-d8306.appspot.com",
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "837150090249",
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:837150090249:web:f0d7af6b2cf70b85ca84d8",
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "G-06P5ZDPJH5"
@@ -96,7 +96,15 @@ export const getUserProfile = async (userId) => {
     }
   } catch (error) {
     console.error("Error getting user profile:", error);
-    return sampleUserData; // Fallback to sample data
+    // Fallback to a zeroed default profile instead of sample data
+    return {
+      ecoScore: 0,
+      greenCredits: 0,
+      level: 1,
+      totalCO2Saved: 0,
+      streakDays: 0,
+      badges: ['First Steps']
+    };
   }
 };
 
@@ -124,12 +132,17 @@ export const addHabit = async (userId, habitData) => {
       verified: false // Will be verified by AI later
     });
 
-    // Update user's total green credits
-    const userProfile = await getUserProfile(userId);
-    await updateUserProfile(userId, {
-      greenCredits: (userProfile.greenCredits || 0) + (habitData.greenCredits || 5),
-      totalCO2Saved: (userProfile.totalCO2Saved || 0) + ((habitData.greenCredits || 5) * 0.2)
-    });
+    // Atomically update user's totals to avoid race conditions
+    const habitCredits = habitData.greenCredits || 5;
+    const userRef = doc(db, 'users', userId);
+    await setDoc(
+      userRef,
+      {
+        greenCredits: increment(habitCredits),
+        totalCO2Saved: increment(habitCredits * 0.2)
+      },
+      { merge: true }
+    );
 
     return docRef.id;
   } catch (error) {
@@ -149,8 +162,41 @@ export const getUserHabits = async (userId) => {
     return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
   } catch (error) {
     console.error("Error getting habits:", error);
-    return sampleUserData.habits; // Fallback to sample data
+    // Fallback to empty list instead of sample data to avoid fake chart points
+    return [];
   }
+};
+
+// Real-time subscription to a user's profile document
+export const subscribeUserProfile = (userId, callback) => {
+  const userRef = doc(db, 'users', userId);
+  return onSnapshot(userRef, (snapshot) => {
+    if (snapshot.exists()) {
+      callback(snapshot.data());
+    } else {
+      callback({
+        ecoScore: 0,
+        greenCredits: 0,
+        level: 1,
+        totalCO2Saved: 0,
+        streakDays: 0,
+        badges: ['First Steps']
+      });
+    }
+  });
+};
+
+// Real-time subscription to a user's habits query
+export const subscribeUserHabits = (userId, callback) => {
+  const q = query(
+    collection(db, 'habits'),
+    where('userId', '==', userId),
+    orderBy('timestamp', 'desc')
+  );
+  return onSnapshot(q, (querySnapshot) => {
+    const items = querySnapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+    callback(items);
+  });
 };
 
 // Get habits with photos for AI verification

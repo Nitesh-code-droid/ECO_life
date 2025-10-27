@@ -1,8 +1,8 @@
-import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { auth } from './firebase';
+import { ref, uploadBytes, getDownloadURL, uploadBytesResumable } from 'firebase/storage';
+import { storage } from './firebase';
 
 // Initialize Firebase Storage
-const storage = getStorage();
+const storageInstance = storage;
 
 interface CompressOptions {
   maxWidth?: number;
@@ -61,15 +61,78 @@ export const compressImage = (file: File, options: CompressOptions = {}): Promis
         quality
       );
     };
-
+    
     img.onerror = () => reject(new Error('Failed to load image'));
     img.src = URL.createObjectURL(file);
+  });
+};
+
+// Resumable upload with progress callback
+export const uploadHabitPhotoResumable = async (
+  userId: string,
+  file: File,
+  onProgress?: (progress: number) => void
+): Promise<string> => {
+  return new Promise<string>((resolve, reject) => {
+    try {
+      const timestamp = Date.now();
+      const randomId = Math.random().toString(36).substring(2);
+      const fileExtension = file.name.split('.').pop();
+      const fileName = `habit_${timestamp}_${randomId}.${fileExtension}`;
+
+      const storageRef = ref(storageInstance, `habits/${userId}/${fileName}`);
+      const task = uploadBytesResumable(storageRef, file);
+
+      let timeoutId: any = setTimeout(() => {
+        try { task.cancel(); } catch {}
+        reject(new Error('Upload timed out'));
+      }, 120000);
+
+      task.on(
+        'state_changed',
+        (snapshot) => {
+          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+          if (onProgress) onProgress(Number(progress.toFixed(0)));
+        },
+        (error) => {
+          clearTimeout(timeoutId);
+          reject(error);
+        },
+        async () => {
+          clearTimeout(timeoutId);
+          try {
+            const url = await getDownloadURL(task.snapshot.ref);
+            resolve(url);
+          } catch (e) {
+            reject(e);
+          }
+        }
+      );
+    } catch (e) {
+      reject(e);
+    }
   });
 };
 
 // Upload habit photo to Firebase Storage
 export const uploadHabitPhoto = async (userId: string, file: File): Promise<string> => {
   try {
+    const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise<T> => {
+      let t: any;
+      const timeout = new Promise<never>((_, reject) => {
+        t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      });
+      try {
+        // race original promise with timeout
+        const result = await Promise.race([p, timeout]);
+        clearTimeout(t);
+        return result as T;
+      } catch (e) {
+        clearTimeout(t);
+        throw e;
+      }
+    };
+
     // Generate unique filename
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2);
@@ -77,13 +140,13 @@ export const uploadHabitPhoto = async (userId: string, file: File): Promise<stri
     const fileName = `habit_${timestamp}_${randomId}.${fileExtension}`;
     
     // Create storage reference
-    const storageRef = ref(storage, `habits/${userId}/${fileName}`);
+    const storageRef = ref(storageInstance, `habits/${userId}/${fileName}`);
     
     // Upload file
-    const snapshot = await uploadBytes(storageRef, file);
+    const snapshot = await withTimeout(uploadBytes(storageRef, file), 30000, 'Upload');
     
     // Get download URL
-    const downloadURL = await getDownloadURL(snapshot.ref);
+    const downloadURL = await withTimeout(getDownloadURL(snapshot.ref), 20000, 'GetDownloadURL');
     
     return downloadURL;
   } catch (error) {
