@@ -8,6 +8,7 @@ import { auth, getUserProfile, isFirebaseConfigured, updateUserProfile, subscrib
 import TubelightNavbar from '@/components/TubelightNavbar';
 import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
+import ProfilePhotoUpload from '@/components/ProfilePhotoUpload';
 import './App.css';
 
 interface UserProfile {
@@ -17,6 +18,8 @@ interface UserProfile {
   totalCO2Saved: number;
   streakDays: number;
   badges: string[];
+  profilePhotoURL?: string | null;
+  profilePhotoUploaded?: boolean;
 }
 
 const App = () => {
@@ -112,6 +115,9 @@ const App = () => {
     );
   }
 
+  // Show profile photo upload modal if user hasn't uploaded one yet
+  const showProfilePhotoUpload = user && userProfile && !userProfile.profilePhotoUploaded;
+
   return (
     <TooltipProvider>
       <Toaster />
@@ -127,6 +133,26 @@ const App = () => {
           activeTab={activeTab} 
           onProfileUpdate={updateProfile}
         />
+        
+        {/* Profile Photo Upload Modal */}
+        {showProfilePhotoUpload && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <ProfilePhotoUpload
+              userId={user.uid}
+              currentPhotoURL={userProfile.profilePhotoURL}
+              onPhotoUploaded={(photoURL) => {
+                updateProfile({ 
+                  profilePhotoURL: photoURL,
+                  profilePhotoUploaded: true 
+                });
+              }}
+              onSkip={() => {
+                updateProfile({ profilePhotoUploaded: true });
+              }}
+              required={false}
+            />
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );

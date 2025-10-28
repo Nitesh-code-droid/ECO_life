@@ -7,6 +7,7 @@ import { Calendar, TrendingUp, Leaf, Zap, Target, Award } from 'lucide-react';
 import HabitLogger from '@/components/HabitLogger';
 import CarbonAnalyzer from '@/components/CarbonAnalyzer';
 import RewardsSystem from '@/components/RewardsSystem';
+import ProfilePhotoUpload from '@/components/ProfilePhotoUpload';
 import { sampleUserData, getUserHabits, getUserProfile, subscribeUserHabits } from '@/lib/firebase';
 
 interface UserProfile {
@@ -16,6 +17,8 @@ interface UserProfile {
   totalCO2Saved: number;
   streakDays: number;
   badges: string[];
+  profilePhotoURL?: string | null;
+  profilePhotoUploaded?: boolean;
 }
 
 interface DashboardProps {
@@ -27,6 +30,7 @@ interface DashboardProps {
 
 const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onProfileUpdate }) => {
   const [recentHabits, setRecentHabits] = useState([] as any[]);
+  const [showPhotoUpload, setShowPhotoUpload] = useState(false);
 
   useEffect(() => {
     if (!user?.uid) return;
@@ -453,14 +457,42 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
   );
 
   const renderProfileContent = () => (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto space-y-6">
       <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
         <CardHeader className="text-center">
-          <div className="w-24 h-24 rounded-full bg-gradient-to-r from-emerald-400 to-lime-400 mx-auto mb-4 flex items-center justify-center text-2xl font-bold text-white">
-            {user?.displayName?.charAt(0) || 'U'}
+          <div className="relative w-24 h-24 mx-auto mb-4">
+            {userProfile?.profilePhotoURL ? (
+              <img 
+                src={userProfile.profilePhotoURL} 
+                alt="Profile" 
+                className="w-24 h-24 rounded-full object-cover border-4 border-emerald-400"
+              />
+            ) : (
+              <div className="w-24 h-24 rounded-full bg-gradient-to-r from-emerald-400 to-lime-400 flex items-center justify-center text-2xl font-bold text-white">
+                {user?.displayName?.charAt(0) || 'U'}
+              </div>
+            )}
+            <button
+              onClick={() => setShowPhotoUpload(true)}
+              className="absolute bottom-0 right-0 bg-emerald-500 hover:bg-emerald-600 text-white rounded-full p-2 shadow-lg transition-colors"
+              title="Update profile photo"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
           </div>
           <CardTitle className="text-white">{user?.displayName || 'Eco Warrior'}</CardTitle>
           <CardDescription className="text-gray-300">{user?.email || 'demo@ecolife.com'}</CardDescription>
+          {userProfile?.profilePhotoUploaded && (
+            <div className="mt-2 inline-flex items-center gap-1 px-3 py-1 bg-green-500/20 text-green-400 rounded-full text-xs">
+              <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Face Verification Enabled
+            </div>
+          )}
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="grid grid-cols-2 gap-4 text-center">
@@ -487,6 +519,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, userProfile, activeTab, onP
           </div>
         </CardContent>
       </Card>
+      
+      {/* Profile Photo Upload Modal */}
+      {showPhotoUpload && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="relative">
+            <button
+              onClick={() => setShowPhotoUpload(false)}
+              className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-2 z-10 shadow-lg"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            <ProfilePhotoUpload
+              userId={user?.uid || ''}
+              currentPhotoURL={userProfile?.profilePhotoURL}
+              onPhotoUploaded={(photoURL) => {
+                onProfileUpdate({ 
+                  profilePhotoURL: photoURL,
+                  profilePhotoUploaded: true 
+                });
+                setShowPhotoUpload(false);
+              }}
+              onSkip={() => setShowPhotoUpload(false)}
+              required={false}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 

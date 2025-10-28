@@ -115,7 +115,7 @@ export const uploadHabitPhotoResumable = async (
 };
 
 // Upload habit photo to Firebase Storage
-export const uploadHabitPhoto = async (userId: string, file: File): Promise<string> => {
+export const uploadHabitPhoto = async (userId: string, file: File, folder: string = 'habits'): Promise<string> => {
   try {
     const withTimeout = async <T>(p: Promise<T>, ms: number, label: string): Promise<T> => {
       let t: any;
@@ -137,10 +137,10 @@ export const uploadHabitPhoto = async (userId: string, file: File): Promise<stri
     const timestamp = Date.now();
     const randomId = Math.random().toString(36).substring(2);
     const fileExtension = file.name.split('.').pop();
-    const fileName = `habit_${timestamp}_${randomId}.${fileExtension}`;
+    const fileName = `${folder === 'profile-photos' ? 'profile' : 'habit'}_${timestamp}_${randomId}.${fileExtension}`;
     
     // Create storage reference
-    const storageRef = ref(storageInstance, `habits/${userId}/${fileName}`);
+    const storageRef = ref(storageInstance, `${folder}/${userId}/${fileName}`);
     
     // Upload file
     const snapshot = await withTimeout(uploadBytes(storageRef, file), 30000, 'Upload');

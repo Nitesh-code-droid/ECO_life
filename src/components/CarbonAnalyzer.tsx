@@ -50,8 +50,8 @@ const CarbonAnalyzer: React.FC<CarbonAnalyzerProps> = ({ onProductAnalyzed }) =>
   };
 
   const quickSearchItems = [
-    'Apple', 'Beef', 'Plastic bottle', 'Electric car', 
-    'Solar panel', 'Banana', 'Fast fashion', 'LED bulb'
+    'Apple', 'Beef', 'Electric car', 'Solar panel', 
+    'Banana', 'Fast fashion', 'LED bulb', 'Coffee'
   ];
 
   const getCarbonLevel = (footprint: number) => {

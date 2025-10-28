@@ -7,10 +7,12 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Plus, Leaf, Car, Utensils, Zap, Trash2, Camera, Upload, X, Check, AlertCircle } from 'lucide-react';
+import { Plus, Leaf, Car, Utensils, Zap, Trash2, Camera, Upload, X, Check, AlertCircle, Sparkles, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { addHabit } from '@/lib/firebase';
-import { uploadHabitPhotoResumable, uploadHabitPhoto, compressImage } from '@/lib/storage';
+import { addHabit, getUserProfile } from '@/lib/firebase';
+import { compressImage } from '@/lib/storage';
+import { verifyFace, verifyActivity } from '@/lib/faceVerification';
+import FaceVerificationResult from './FaceVerificationResult';
 
 interface HabitLoggerProps {
   userId: string;
@@ -32,10 +34,11 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
   const [habitName, setHabitName] = useState('');
   const [category, setCategory] = useState('');
   const [description, setDescription] = useState('');
-  const [customCredits, setCustomCredits] = useState('');
   const [photos, setPhotos] = useState<PhotoUpload[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
+  const [verificationResult, setVerificationResult] = useState<any>(null);
+  const [showVerificationResult, setShowVerificationResult] = useState(false);
 
   const categories = [
     { id: 'transportation', name: 'Transportation', icon: Car, color: 'bg-blue-500', credits: 10 },
@@ -144,28 +147,34 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
   };
 
   const uploadPhotos = async (): Promise<string[]> => {
+    // Convert photos to base64 instead of uploading to Firebase Storage
     const uploadPromises = photos.map(async (photo, index) => {
       if (photo.uploaded && photo.url) return photo.url;
       
       setPhotos(prev => prev.map((p, i) => 
-        i === index ? { ...p, uploading: true, progress: 0 } : p
+        i === index ? { ...p, uploading: true, progress: 50 } : p
       ));
 
       try {
         const fileToUpload = photo.compressed || photo.file;
-        const url = await uploadHabitPhotoResumable(userId, fileToUpload, (progress) => {
-          setPhotos(prev => prev.map((p, i) => 
-            i === index ? { ...p, progress } : p
-          ));
+        
+        // Convert to base64 (no Firebase Storage needed!)
+        const reader = new FileReader();
+        const base64Promise = new Promise<string>((resolve, reject) => {
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = reject;
+          reader.readAsDataURL(fileToUpload);
         });
         
+        const base64Url = await base64Promise;
+        
         setPhotos(prev => prev.map((p, i) => 
-          i === index ? { ...p, uploading: false, uploaded: true, url, progress: 100 } : p
+          i === index ? { ...p, uploading: false, uploaded: true, url: base64Url, progress: 100 } : p
         ));
         
-        return url;
+        return base64Url;
       } catch (error) {
-        console.error('Error uploading photo:', error);
+        console.error('Error converting photo:', error);
         setPhotos(prev => prev.map((p, i) => 
           i === index ? { ...p, uploading: false } : p
         ));
@@ -201,8 +210,7 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
       }
 
       const selectedCategory = categories.find(cat => cat.id === category);
-      const baseCredits = selectedCategory?.credits || 5;
-      const finalCredits = customCredits ? parseInt(customCredits) : baseCredits;
+      const finalCredits = selectedCategory?.credits || 5;
 
       const habitData = {
         name: habitName,
@@ -216,20 +224,122 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
         userId
       };
 
-      await addHabit(userId, habitData);
+      // Face verification and activity verification if photo exists
+      let bonusCredits = 0;
+      let faceVerified = false;
+      let activityVerified = false;
+      let similarityScore = 0;
+      let activityScore = 0;
+
+      if (photoUrls.length > 0) {
+        try {
+          // Get user's profile photo
+          const userProfile = await getUserProfile(userId);
+          
+          // Step 1: Face Verification
+          if (userProfile?.profilePhotoURL) {
+            toast.info('🔍 Verifying your face...', { duration: 2000 });
+            
+            const verifyResult = await verifyFace(
+              userProfile.profilePhotoURL,
+              photoUrls[0],
+              0.5
+            );
+
+            if (verifyResult.verified) {
+              bonusCredits += 5;
+              faceVerified = true;
+              similarityScore = verifyResult.similarity_score || 0;
+              
+              toast.success('✅ Face verified!', { duration: 2000 });
+              
+              // Step 2: Activity Verification (only if face is verified)
+              toast.info('🎯 Verifying activity...', { duration: 2000 });
+              
+              // Create better description for CLIP based on category and habit
+              const activityDescriptions: Record<string, string> = {
+                'transportation': 'person riding bicycle or cycling',
+                'energy': 'person with solar panels or renewable energy',
+                'food': 'person with organic food or vegetables',
+                'waste-reduction': 'person recycling or composting waste',
+                'nature': 'person planting tree or gardening outdoors'
+              };
+              
+              const baseDescription = activityDescriptions[category] || habitName;
+              const fullDescription = `${baseDescription}, ${habitName}`;
+              
+              const activityResult = await verifyActivity(
+                photoUrls[0],
+                fullDescription,
+                0.23 // Slightly lower threshold for better matching
+              );
+              
+              if (activityResult.verified) {
+                bonusCredits += 5; // Additional bonus for activity match
+                activityVerified = true;
+                activityScore = activityResult.similarity_score || 0;
+                
+                toast.success('🎉 Activity verified!', { duration: 2000 });
+              } else {
+                activityScore = activityResult.similarity_score || 0;
+                toast.warning('⚠️ Activity not verified', { 
+                  description: `Similarity: ${(activityScore * 100).toFixed(0)}% (needs ${(0.23 * 100).toFixed(0)}%)`,
+                  duration: 3000 
+                });
+              }
+              
+              // Show combined verification result
+              setVerificationResult({
+                verified: true,
+                similarity_score: similarityScore,
+                bonusCredits,
+                activityVerified,
+                activityScore
+              });
+              setShowVerificationResult(true);
+              setTimeout(() => setShowVerificationResult(false), 10000); // 10 seconds
+            } else {
+              setVerificationResult({
+                verified: false,
+                similarity_score: verifyResult.similarity_score || 0
+              });
+              setShowVerificationResult(true);
+              setTimeout(() => setShowVerificationResult(false), 8000); // 8 seconds
+            }
+          }
+        } catch (error) {
+          console.error('Verification error:', error);
+          // Continue without verification if API fails
+        }
+      }
+
+      // Update habit data with verification results
+      const finalHabitData = {
+        ...habitData,
+        greenCredits: finalCredits + bonusCredits,
+        faceVerified,
+        activityVerified,
+        faceVerificationScore: similarityScore,
+        activityVerificationScore: activityScore,
+        bonusCreditsAwarded: bonusCredits
+      };
+
+      await addHabit(userId, finalHabitData);
       
       onHabitAdded({
-        ...habitData,
+        ...finalHabitData,
         date: new Date()
       });
 
-      // Success message with photo info
+      // Success message
       const photoMessage = photoUrls.length > 0 
         ? ` with ${photoUrls.length} photo${photoUrls.length > 1 ? 's' : ''}`
         : '';
       
+      const bonusMessage = bonusCredits > 0 ? ` (+${bonusCredits} bonus for verified face!)` : '';
+      
       toast.success(`Habit logged successfully${photoMessage}! 🌱`, {
-        description: `+${finalCredits} Green Credits earned${photoUrls.length > 0 ? ' (pending photo verification)' : ''}`,
+        description: `+${finalCredits + bonusCredits} Green Credits earned${bonusMessage}`,
         duration: 4000,
       });
 
@@ -237,7 +347,6 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
       setHabitName('');
       setCategory('');
       setDescription('');
-      setCustomCredits('');
       setPhotos([]);
       setIsOpen(false);
 
@@ -252,6 +361,7 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
   const selectedCategory = categories.find(cat => cat.id === category);
 
   return (
+    <>
     <Card className="bg-gray-800/50 backdrop-blur-sm border-emerald-500/30">
       <CardHeader>
         <CardTitle className="text-white flex items-center space-x-2">
@@ -451,23 +561,6 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
                 )}
               </div>
 
-              {/* Custom Credits */}
-              <div className="space-y-2">
-                <Label htmlFor="customCredits" className="text-white">
-                  Custom Credits (Optional)
-                </Label>
-                <Input
-                  id="customCredits"
-                  type="number"
-                  value={customCredits}
-                  onChange={(e) => setCustomCredits(e.target.value)}
-                  placeholder={selectedCategory ? `Default: ${selectedCategory.credits}` : '5'}
-                  className="bg-gray-700 border-gray-600 text-white placeholder-gray-400"
-                  min="1"
-                  max="50"
-                />
-              </div>
-
               {/* Action Buttons */}
               <div className="flex space-x-3">
                 <Button
@@ -495,7 +588,6 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
                     setHabitName('');
                     setCategory('');
                     setDescription('');
-                    setCustomCredits('');
                     setPhotos([]);
                   }}
                   className="border-gray-600 text-gray-300 hover:bg-gray-700"
@@ -508,6 +600,18 @@ const HabitLogger: React.FC<HabitLoggerProps> = ({ userId, onHabitAdded }) => {
         </AnimatePresence>
       </CardContent>
     </Card>
+    
+    {/* Face Verification Result Modal - Outside Card for full screen centering */}
+    {showVerificationResult && verificationResult && (
+      <FaceVerificationResult
+        verified={verificationResult.verified}
+        similarity_score={verificationResult.similarity_score}
+        bonusCredits={verificationResult.bonusCredits}
+        activityVerified={verificationResult.activityVerified}
+        activityScore={verificationResult.activityScore}
+      />
+    )}
+    </>
   );
 };
 

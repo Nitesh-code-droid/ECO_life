@@ -3,6 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, doc, setDoc, getDoc, onSnapshot, increment, serverTimestamp } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
+import { searchCarbonFootprint } from './carbonDatabase.js';
 
 // Firebase config - Using VITE_ prefix for Vite environment variables
 const firebaseConfig = {
@@ -71,8 +72,27 @@ const googleProvider = new GoogleAuthProvider();
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 
-// Carbon Footprint: Direct call to Climatiq API
+// Carbon Footprint: Use local database (fast, reliable, no API errors)
 export const getCarbonFootprint = async (productName) => {
+  // Simulate slight delay for UX (optional)
+  await new Promise(resolve => setTimeout(resolve, 300));
+  
+  const result = searchCarbonFootprint(productName);
+  
+  return {
+    carbonFootprint: result.co2e,
+    isEcoFriendly: result.isEcoFriendly,
+    alternatives: result.alternatives,
+    co2e_unit: result.unit,
+    source: 'local_database',
+    category: result.category,
+    message: result.message
+  };
+};
+
+// OLD CLIMATIQ API CODE (kept for reference, can be deleted)
+/*
+export const getCarbonFootprintAPI = async (productName) => {
   const API_KEY = "V1Z4DT9E9D3CDDQK3RA6FSQ0TM";
   const DATA_VERSION = "27.27";
 
@@ -88,7 +108,8 @@ export const getCarbonFootprint = async (productName) => {
     const lowerUnitType = unitType.toLowerCase();
     console.log('🔍 Unit type received:', unitType, '→ Lower:', lowerUnitType);
 
-    if (lowerUnitType.includes("mass") || lowerUnitType.includes("weight")) return "mass";
+    if (lowerUnitType.includes("weight")) return "weight";
+    if (lowerUnitType.includes("mass")) return "mass";
     if (lowerUnitType.includes("distance")) return "distance";
     if (lowerUnitType.includes("energy")) return "energy";
     if (lowerUnitType.includes("volume")) return "volume";
@@ -164,64 +185,31 @@ export const getCarbonFootprint = async (productName) => {
 
     const defaults = defaultValues[param];
 
-    // Step 2: Estimate emissions - try different parameter formats
-    let estimateResponse;
-    let successfulPayload;
-    const attempts = [
-      {
-        name: 'unit_type_direct',
-        payload: {
-          emission_factor: { activity_id, data_version: DATA_VERSION },
-          parameters: { [unit_type]: defaults.value }
-        }
+    // Step 2: Estimate emissions using correct Climatiq format
+    const estimatePayload = {
+      emission_factor: { activity_id, data_version: DATA_VERSION },
+      parameters: { [param]: defaults.value, [`${param}_unit`]: defaults.unit }
+    };
+
+    console.log('📤 Estimate payload:', JSON.stringify(estimatePayload, null, 2));
+
+    const estimateResponse = await fetch("https://api.climatiq.io/data/v1/estimate", {
+      method: "POST",
+      headers: {
+        'Authorization': `Bearer ${API_KEY}`,
+        'Content-Type': 'application/json'
       },
-      {
-        name: 'mapped_with_unit',
-        payload: {
-          emission_factor: { activity_id, data_version: DATA_VERSION },
-          parameters: { [param]: defaults.value, [`${param}_unit`]: defaults.unit }
-        }
-      },
-      {
-        name: 'mapped_simple',
-        payload: {
-          emission_factor: { activity_id, data_version: DATA_VERSION },
-          parameters: { [param]: defaults.value }
-        }
-      }
-    ];
+      body: JSON.stringify(estimatePayload)
+    });
 
-    for (const attempt of attempts) {
-      console.log(`📤 Trying ${attempt.name}:`, JSON.stringify(attempt.payload, null, 2));
-
-      const response = await fetch("https://api.climatiq.io/data/v1/estimate", {
-        method: "POST",
-        headers: {
-          'Authorization': `Bearer ${API_KEY}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(attempt.payload)
-      });
-
-      if (response.ok) {
-        console.log(`✅ ${attempt.name} payload worked!`);
-        estimateResponse = response;
-        successfulPayload = attempt.name;
-        break;
-      } else {
-        const errorText = await response.text();
-        console.error(`❌ ${attempt.name} failed:`, errorText);
-      }
+    if (!estimateResponse.ok) {
+      const errorText = await estimateResponse.text();
+      console.error('❌ Estimate API Error:', errorText);
+      throw new Error(`Estimate failed: ${estimateResponse.status} - ${errorText}`);
     }
-
-    if (!estimateResponse) {
-      throw new Error('All parameter formats failed. Check console logs for detailed error messages.');
-    }
-
-    console.log(`🎉 Success with ${successfulPayload} format!`);
 
     const data = await estimateResponse.json();
-    console.log('✅ Final estimate response:', data);
+    console.log('✅ Estimate response:', data);
     
     // Extract CO2e value
     let co2e = 0;
@@ -248,6 +236,7 @@ export const getCarbonFootprint = async (productName) => {
     throw error;
   }
 };
+*/
 
 // Authentication functions
 export const signInWithGoogle = async () => {
@@ -266,6 +255,8 @@ export const signInWithGoogle = async () => {
         email: user.email,
         displayName: user.displayName,
         photoURL: user.photoURL,
+        profilePhotoURL: null, // Will be set when user uploads profile photo for face verification
+        profilePhotoUploaded: false,
         createdAt: new Date(),
         ecoScore: 0,
         greenCredits: 0,
@@ -338,6 +329,21 @@ export const updateUserProfile = async (userId, profileData) => {
     await setDoc(userRef, profileData, { merge: true });
   } catch (error) {
     console.error("Error updating profile:", error);
+    throw error;
+  }
+};
+
+// Update user's profile photo for face verification
+export const updateProfilePhoto = async (userId, photoURL) => {
+  try {
+    const userRef = doc(db, 'users', userId);
+    await setDoc(userRef, {
+      profilePhotoURL: photoURL,
+      profilePhotoUploaded: true,
+      profilePhotoUpdatedAt: new Date()
+    }, { merge: true });
+  } catch (error) {
+    console.error("Error updating profile photo:", error);
     throw error;
   }
 };
